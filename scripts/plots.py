@@ -39,7 +39,7 @@ def plot_components_by_r2(residual_results,cv,results_dir,time_periods,show=Fals
         plt.close()
 
 # i think that works as well, remains to be checked with multiple pairs
-def plot_avg_r2(residual_results, title, results_dir, cv, time_periods, show=False):
+def plot_avg_r2(residual_results, results_dir, cv, time_periods, show=False):
     '''
     Create bar plots showing average R² correlations for each residual pair across time periods.
     This is to be used with cv = n_folds>1
@@ -69,6 +69,10 @@ def plot_avg_r2(residual_results, title, results_dir, cv, time_periods, show=Fal
     for i in range(0, len(residual_pairs), 2):
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
         fig.suptitle('Average R² Across Folds', fontsize=16)
+        residual_pair = residual_pairs[i]
+        residual_X = residual_pair.split('/')[0]
+        residual_Y = residual_pair.split('/')[1]
+        title = f'{cv}_{residual_X}-{residual_Y}'
         x = np.arange(len(time_periods))
         #title = f'{cv}_{residual_pairs[i]}-{residual_pairs[i+1]}'
         

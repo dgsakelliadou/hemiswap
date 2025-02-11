@@ -14,6 +14,7 @@ from datetime import datetime
 import gc  # For garbage collection
 import hemiSwap_consts as hconsts
 from contextlib import contextmanager
+import psutil
 hemiswap = hconsts.HemiSwap_consts('miller-lab-3', 'tiergan')
 
 @contextmanager
@@ -202,7 +203,7 @@ def process_multi_sessions(hemiswap, subject_id, total_sessions, rate_bin_params
             print(f"Processing session {session_id}")
             try:
                 # Create session-specific directory
-                session_results_dir = os.path.join(main_results_dir, f'session_{session_id}')
+                session_results_dir = os.path.join(main_results_dir, f'session_{session_id}/{reshape_method}')
                 os.makedirs(session_results_dir, exist_ok=True)
                 
                 # Load and process session data
@@ -256,3 +257,178 @@ def process_multi_sessions(hemiswap, subject_id, total_sessions, rate_bin_params
     
     return main_results_dir
 
+########### - multisession function but with extra attention on memory usage for when running all sessions - #######
+def process_multi_sessions_memory(hemiswap, subject_id, total_sessions, rate_bin_params, train_test_ratio, reshape_method,
+                         sessions, step_size, n_folds_list, time_periods, reg_params, output_dir, 
+                         all_sessions=False, batch_size=1):
+    """
+    Run the testing framework across multiple sessions with robust memory management and error handling.
+    
+    Parameters:
+    -----------
+    [previous parameters remain the same...]
+    batch_size : int, optional
+        Number of sessions to process before forcing garbage collection
+    """
+    
+    
+    @contextmanager
+    def memory_guard():
+        """Context manager to ensure memory cleanup"""
+        try:
+            yield
+        finally:
+            gc.collect()
+    
+    def check_memory():
+        """Monitor memory usage"""
+        memory_use = psutil.Process().memory_info().rss / 1024 / 1024  # MB
+        if memory_use > 0.9 * psutil.virtual_memory().total / 1024 / 1024:
+            print(f"Warning: High memory usage detected: {memory_use:.2f} MB")
+            gc.collect()
+        return memory_use
+    
+    def save_checkpoint(session_id, results, checkpoint_dir):
+        """Save intermediate results"""
+        checkpoint_file = os.path.join(checkpoint_dir, f'checkpoint_session_{session_id}.npz')
+        np.savez_compressed(checkpoint_file, results=results)
+    
+    try:
+        # Session selection
+        if all_sessions:
+            selected_sessions = list(range(1, total_sessions + 1))
+        else:
+            selected_sessions = get_session_selection(total_sessions, step_size)
+        
+        # Create main results directory with timestamp
+        main_results_dir = os.path.join(output_dir, f'multi_session_analysis_{datetime.now().strftime("%Y%m%d_%H%M%S")}')
+        os.makedirs(main_results_dir, exist_ok=True)
+        
+        # Create checkpoint directory
+        checkpoint_dir = os.path.join(main_results_dir, 'checkpoints')
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        
+        # Save analysis parameters
+        analysis_params = {
+            'total_sessions': total_sessions,
+            'step_size': step_size,
+            'selected_sessions': selected_sessions,
+            'n_folds_list': n_folds_list,
+            'time_periods': {k: list(v) for k, v in time_periods.items()},
+            'reg_params': list(reg_params),
+            'subject_id': subject_id,
+            'rate_bin_params': rate_bin_params,
+            'train_test_ratio': train_test_ratio,
+            'reshape_method': reshape_method,
+            'start_time': datetime.now().strftime("%Y%m%d_%H%M%S")
+        }
+        save_analysis_metadata(main_results_dir, analysis_params)
+        
+        # Process sessions in batches
+        for batch_start in range(0, len(selected_sessions), batch_size):
+            with memory_guard():
+                batch_sessions = selected_sessions[batch_start:batch_start + batch_size]
+                print(f"\nProcessing batch: {batch_sessions}")
+                
+                for idx in batch_sessions:
+                    session_id = sessions[idx]
+                    print(f"\nProcessing session {session_id}")
+                    check_memory()  # Monitor memory usage
+                    
+                    try:
+                        # Create session-specific directory
+                        session_results_dir = os.path.join(main_results_dir, f'session_{session_id}/{reshape_method}')
+                        os.makedirs(session_results_dir, exist_ok=True)
+                        
+                        # Load and process session data
+                        with memory_guard():
+                            residuals_dict, _, rate_bin_centers = lps.load_and_preprocess_session(
+                                session_id, hemiswap, reshape_method
+                            )
+                        
+                        all_results = {}
+                        for residuals, (X, Y) in residuals_dict.items():
+                            print(f"  Processing residuals: {residuals}")
+                            all_results[residuals] = {}
+                            residual_X, residual_Y = residuals.split('/')
+                            
+                            for n_folds in n_folds_list:
+                                all_results[residuals][f'folds_{n_folds}'] = {}
+                            
+                            for time_period, (start, end) in time_periods.items():
+                                print(f"    Processing time period: {time_period}")
+                                check_memory()
+                                
+                                with memory_guard():
+                                    # Extract time window data
+                                    target_bins = np.where((rate_bin_centers >= start) & (rate_bin_centers <= end))[0]
+                                    X_time_win = X[:, :, target_bins]
+                                    Y_time_win = Y[:, :, target_bins]
+                                    
+                                    # Reshape data according to method
+                                    if reshape_method == 'trial_averaged':
+                                        X_reshaped = np.mean(X_time_win, axis=2)
+                                        Y_reshaped = np.mean(Y_time_win, axis=2)
+                                    elif reshape_method == 'trial_concatenated':
+                                        X_reshaped, Y_reshaped = lps.trial_concatenated_residuals(X_time_win, Y_time_win)
+                                    else:
+                                        raise ValueError('reshape_method must be either "trial_averaged" or "trial_concatenated"')
+                                    
+                                    # Clear unnecessary arrays
+                                    del X_time_win, Y_time_win
+                                    
+                                    for n_folds in n_folds_list:
+                                        title = f'{n_folds}_folds_{residual_X}-{residual_Y}-{time_period}'
+                                        folds_results = cca.perform_cca(
+                                            X_reshaped, Y_reshaped,
+                                            residual_X, residual_Y,
+                                            title, session_results_dir,
+                                            cv=n_folds, reg=True,
+                                            reg_params=reg_params
+                                        )
+                                        
+                                        all_results[residuals][f'folds_{n_folds}'][time_period] = folds_results
+                                        
+                                    # Clear reshaped arrays
+                                    del X_reshaped, Y_reshaped
+                            
+                            # Save checkpoint after each residual type
+                            save_checkpoint(session_id, all_results, checkpoint_dir)
+                        
+                        # Save final results for this session
+                        results_file = os.path.join(session_results_dir, f'session_{session_id}_results_{reshape_method}.npz')
+                        np.savez_compressed(results_file, results=all_results)
+                        
+                        # Clean up
+                        del all_results
+                        gc.collect()
+                        
+                    except Exception as e:
+                        print(f"Error processing session {session_id}: {str(e)}")
+                        # Save error information
+                        error_file = os.path.join(session_results_dir, f'error_log_{session_id}.txt')
+                        with open(error_file, 'w') as f:
+                            f.write(f"Error processing session {session_id}: {str(e)}")
+                        continue
+                
+                # Force garbage collection after each batch
+                gc.collect()
+        
+        # Clean up checkpoints after successful completion
+        for checkpoint_file in os.listdir(checkpoint_dir):
+            os.remove(os.path.join(checkpoint_dir, checkpoint_file))
+        os.rmdir(checkpoint_dir)
+        
+        # Save completion timestamp
+        with open(os.path.join(main_results_dir, 'completion_time.txt'), 'w') as f:
+            f.write(datetime.now().strftime("%Y%m%d_%H%M%S"))
+        
+        return main_results_dir
+    
+    except Exception as e:
+        print(f"Critical error in multi-session processing: {str(e)}")
+        # Save global error information
+        error_file = os.path.join(main_results_dir, 'critical_error_log.txt')
+        with open(error_file, 'w') as f:
+            f.write(f"Critical error: {str(e)}")
+        raise

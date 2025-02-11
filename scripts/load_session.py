@@ -261,7 +261,7 @@ def trial_concatenated_residuals(X, Y):
 
     
     return X_reshaped, Y_reshaped
-def load_results(session_id, output_dir):
+def load_results(session_id, output_dir,reshape_method):
     """
     Load testing framework results for a given session.
     
@@ -277,8 +277,8 @@ def load_results(session_id, output_dir):
     dict
         The loaded results dictionary
     """
-    results_dir = os.path.join(output_dir, f'session_{session_id}')
-    results_file = os.path.join(results_dir, f'{session_id}.npz')
+    results_dir = os.path.join(output_dir, f'session_{session_id}/{reshape_method}')
+    results_file = os.path.join(results_dir, f'{session_id}_{reshape_method}.npz')
     
     # Load the compressed npz file
     loaded_data = np.load(results_file, allow_pickle=True)
