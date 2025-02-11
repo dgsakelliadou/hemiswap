@@ -30,7 +30,7 @@ def process_single_session(hemiswap, session_id, n_folds_list, time_periods, reg
     """
     with memory_guard():
         residuals_dict, _, rate_bin_centers = lps.load_and_preprocess_session(session_id, hemiswap,reshape_method=reshape_method)
-        results_dir = os.path.join(output_dir, f'session_{session_id}')
+        results_dir = os.path.join(output_dir, f'session_{session_id}/{reshape_method}')
     os.makedirs(results_dir, exist_ok=True)
     
     all_results = {}
@@ -41,30 +41,29 @@ def process_single_session(hemiswap, session_id, n_folds_list, time_periods, reg
         for n_folds in n_folds_list:
             all_results[residuals][f'folds_{n_folds}'] = {}
         with memory_guard():
-        
-                for time_period, (start, end) in time_periods.items():
-                    print(time_period)
-                    target_bins = np.where((rate_bin_centers >= start) & (rate_bin_centers <= end))[0]
-                    X_time_win = X[:, :, target_bins]
-                    Y_time_win = Y[:, :, target_bins]
-                    if reshape_method == 'trial_averaged':
-                        X_reshaped = np.mean(X_time_win, axis=2)
-                        Y_reshaped = np.mean(Y_time_win, axis=2)
-                    elif reshape_method == 'trial_concatenated':
-                        X_reshaped, Y_reshaped = lps.trial_concatenated_residuals(X,Y)
-                    else:
-                        raise ValueError('reshape_method must be either "trial_averaged" or "trial_concatenated"')
-                    del X_time_win,Y_time_win
-                    gc.collect()
-                    for n_folds in n_folds_list:
-                        all_results[residuals][f'folds_{n_folds}'][time_period] = {}
-                        title = f'{n_folds}_folds_{residual_X}-{residual_Y}-{time_period}'
-                        #kf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
+            for time_period, (start, end) in time_periods.items():
+                print(time_period)
+                target_bins = np.where((rate_bin_centers >= start) & (rate_bin_centers <= end))[0]
+                X_time_win = X[:, :, target_bins]
+                Y_time_win = Y[:, :, target_bins]
+                if reshape_method == 'trial_averaged':
+                    X_reshaped = np.mean(X_time_win, axis=2)
+                    Y_reshaped = np.mean(Y_time_win, axis=2)
+                elif reshape_method == 'trial_concatenated':
+                    X_reshaped, Y_reshaped = lps.trial_concatenated_residuals(X_time_win,Y_time_win)
+                else:
+                    raise ValueError('reshape_method must be either "trial_averaged" or "trial_concatenated"')
+                del X_time_win,Y_time_win
+                gc.collect()
+                for n_folds in n_folds_list:
+                    all_results[residuals][f'folds_{n_folds}'][time_period] = {}
+                    title = f'{n_folds}_folds_{residual_X}-{residual_Y}-{time_period}'
+                    #kf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
 
-                        folds_results = cca.perform_cca(X_reshaped, Y_reshaped, residual_X, residual_Y, title,results_dir,cv=n_folds,reg=True,reg_params=reg_params)
-                        
-                        #avg_correlations = folds_results['correlations'] #np.mean(correlations_all_folds, axis=0)
-                        all_results[residuals][f'folds_{n_folds}'][time_period] = folds_results
+                    folds_results = cca.perform_cca(X_reshaped, Y_reshaped, residual_X, residual_Y, title,results_dir,cv=n_folds,reg=True,reg_params=reg_params)
+                    
+                    #avg_correlations = folds_results['correlations'] #np.mean(correlations_all_folds, axis=0)
+                    all_results[residuals][f'folds_{n_folds}'][time_period] = folds_results
 
             
         
@@ -75,6 +74,10 @@ def process_single_session(hemiswap, session_id, n_folds_list, time_periods, reg
     np.savez_compressed(results_file, results=all_results)
     
     return all_results
+
+
+
+
 
 def load_results(session_id, output_dir):
     """
@@ -214,35 +217,29 @@ def process_multi_sessions(hemiswap, subject_id, total_sessions, rate_bin_params
                     for n_folds in n_folds_list:
                         all_results[residuals][f'folds_{n_folds}'] = {}
 
-                    if reshape_method == 'trial_averaged':
-                        for time_period, (start, end) in time_periods.items():
-                            print(f"  Processing {time_period}")
-                            target_bins = np.where((rate_bin_centers >= start) & (rate_bin_centers <= end))[0]
-                            X_time_win = X[:, :, target_bins]
-                            Y_time_win = Y[:, :, target_bins]
-                            
+                    
+                    for time_period, (start, end) in time_periods.items():
+                        print(f"  Processing {time_period}")
+                        target_bins = np.where((rate_bin_centers >= start) & (rate_bin_centers <= end))[0]
+                        X_time_win = X[:, :, target_bins]
+                        Y_time_win = Y[:, :, target_bins]
+                        if reshape_method == 'trial_averaged':
                             X_reshaped = np.mean(X_time_win, axis=2)
                             Y_reshaped = np.mean(Y_time_win, axis=2)
-                            
-                            for n_folds in n_folds_list:
-                                title = f'{n_folds}_folds_{residual_X}-{residual_Y}-{time_period}'
-                                folds_results = cca.perform_cca(X_reshaped, Y_reshaped, 
-                                                            residual_X, residual_Y, 
-                                                            title, session_results_dir,
-                                                            cv=n_folds, reg=True, 
-                                                            reg_params=reg_params)
-                                
-                                all_results[residuals][f'folds_{n_folds}'][time_period] = folds_results
-                    else:
-                        X_reshaped, Y_reshaped = lps.trial_concatenated_residuals(X,Y)
+                        elif reshape_method == 'trial_concatenated':
+                            X_reshaped, Y_reshaped = lps.trial_concatenated_residuals(X_time_win,Y_time_win)
+                        else:
+                            raise ValueError('reshape_method must be either "trial_averaged" or "trial_concatenated"')
                         for n_folds in n_folds_list:
-                            title = f'{n_folds}_folds_{residual_X}-{residual_Y}'
+                            title = f'{n_folds}_folds_{residual_X}-{residual_Y}-{time_period}'
                             folds_results = cca.perform_cca(X_reshaped, Y_reshaped, 
-                                                            residual_X, residual_Y, 
-                                                            title, session_results_dir,
-                                                            cv=n_folds, reg=True, 
-                                                            reg_params=reg_params)
-                            all_results[residuals][f'folds_{n_folds}']['trial_concatenated'] = folds_results
+                                                        residual_X, residual_Y, 
+                                                        title, session_results_dir,
+                                                        cv=n_folds, reg=True, 
+                                                        reg_params=reg_params)
+                            
+                            all_results[residuals][f'folds_{n_folds}'][time_period] = folds_results
+                    
                 
                 # Save results for this session
                 results_file = os.path.join(session_results_dir, f'session_{session_id}_results_{reshape_method}.npz')
