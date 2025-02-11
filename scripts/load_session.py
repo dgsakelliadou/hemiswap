@@ -67,7 +67,7 @@ def load_and_preprocess_session(session_id,hemiswap,reshape_method):
     if reshape_method == 'trial_averaged':
         spike_rate, rate_bins = rate(spikeTimes, method = 'bin', lims = pre_test, width=100e-3,step=50e-3)
     elif reshape_method == 'trial_concatenated':
-        spike_rate, rate_bins = rate(spikeTimes, method = 'bin', lims = pre_test, width=100e-3,step=100e-3, reshape_method = reshape_method)
+        spike_rate, rate_bins = rate(spikeTimes, method = 'bin', lims = pre_test, width=100e-3,step=100e-3)
     else:
         raise ValueError('reshape_method must be either trial_averaged or trial_concatenated')
     rate_bin_centers = np.mean(rate_bins, axis = 1) #why pre-test? see calculating residuals
@@ -249,8 +249,8 @@ def trial_concatenated_residuals(X, Y):
    
     Returns:
     --------
-    dict
-        Dictionary with time period names as keys and trial-concatenated residuals as values
+    tuple
+        The reshaped X and Y residuals
     """
     
     n_trials,n_neurons_right,n_timepoints = X.shape

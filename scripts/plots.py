@@ -5,6 +5,8 @@ import seaborn as sns
 import os
 import load_session as ls
 
+####### PLOTS FOR TRIAL AVERAGED RESIDUALS #######
+
 #THIS WORKS
 def plot_components_by_r2(residual_results,cv,results_dir,time_periods,show=False):
   for residual_pair, folds in residual_results.items():
