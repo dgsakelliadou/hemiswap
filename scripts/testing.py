@@ -16,8 +16,7 @@ import hemiSwap_consts as hconsts
 hemiswap = hconsts.HemiSwap_consts('miller-lab-3', 'tiergan')
 
 
-
-def process_single_session(hemiswap, session_id, n_folds_list, time_periods, reg_params, output_dir,br=False):
+def process_single_session(hemiswap, session_id, n_folds_list, time_periods, reg_params, output_dir,reshape_method,br=False):
     """
     Run the testing framework with L2 regularization and save results for each time period.
     """
@@ -32,39 +31,34 @@ def process_single_session(hemiswap, session_id, n_folds_list, time_periods, reg
         residual_Y = residuals.split('/')[1]
         for n_folds in n_folds_list:
             all_results[residuals][f'folds_{n_folds}'] = {}
-        for time_period, (start, end) in time_periods.items():
-            print(time_period)
-            target_bins = np.where((rate_bin_centers >= start) & (rate_bin_centers <= end))[0]
-            X_time_win = X[:, :, target_bins]
-            Y_time_win = Y[:, :, target_bins]
-            
-            X_reshaped = np.mean(X_time_win, axis=2)
-            Y_reshaped = np.mean(Y_time_win, axis=2)
+        if reshape_method == 'trial_averaged':
+
+            for time_period, (start, end) in time_periods.items():
+                print(time_period)
+                target_bins = np.where((rate_bin_centers >= start) & (rate_bin_centers <= end))[0]
+                X_time_win = X[:, :, target_bins]
+                Y_time_win = Y[:, :, target_bins]
+                
+                X_reshaped = np.mean(X_time_win, axis=2)
+                Y_reshaped = np.mean(Y_time_win, axis=2)
+                for n_folds in n_folds_list:
+                    all_results[residuals][f'folds_{n_folds}'][time_period] = {}
+                    title = f'{n_folds}_folds_{residual_X}-{residual_Y}-{time_period}'
+                    #kf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
+
+                    folds_results = cca.perform_cca(X_reshaped, Y_reshaped, residual_X, residual_Y, title,results_dir,cv=n_folds,reg=True,reg_params=reg_params)
+                    
+                    #avg_correlations = folds_results['correlations'] #np.mean(correlations_all_folds, axis=0)
+                    all_results[residuals][f'folds_{n_folds}'][time_period] = folds_results
+
+        elif reshape_method == 'trial_concatenated':
+            X_reshaped, Y_reshaped = lps.trial_concatenated_residuals(X,Y)
             for n_folds in n_folds_list:
-                all_results[residuals][f'folds_{n_folds}'][time_period] = {}
-                title = f'{n_folds}_folds_{residual_X}-{residual_Y}-{time_period}'
-                #kf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
-
+                title = f'{n_folds}_folds_{residual_X}-{residual_Y}'
                 folds_results = cca.perform_cca(X_reshaped, Y_reshaped, residual_X, residual_Y, title,results_dir,cv=n_folds,reg=True,reg_params=reg_params)
-                
-                #avg_correlations = folds_results['correlations'] #np.mean(correlations_all_folds, axis=0)
-                all_results[residuals][f'folds_{n_folds}'][time_period] = folds_results
-
-                #folds_results['correlations'] = np.array(avg_correlations) **2 #square the correlations to use in plots
-                """
-                #TODO: add visualization
-                 - fix plts (plot.py) and make sure they're saved in the correct place
-                #plts.plot_avg_r2(folds_results, results_dir, time_periods.keys())
-                #plts.plot_components_by_r2(folds_results, results_dir, time_periods.keys())
-                #plts.plot_residual_correlations(folds_results, results_dir, time_periods.keys())
-                
-                """
-            
-                # Save visualization
-                #save_results(session_id, n_folds, [avg_correlations], [optimal_reg], results_dir)
-            
-            #all_results[residuals] = period_results
-        #print(all_results[residuals][f'folds_{n_folds}'].keys())
+                all_results[residuals][f'folds_{n_folds}']['trial_concatenated'] = folds_results
+        else:
+            raise ValueError('reshape_method must be either "trial_averaged" or "trial_concatenated"')
     
         if br:
             break
